@@ -25,8 +25,9 @@ class Message(dict):
 
 # TODO: make this an abstract class, and have a separate class for each model
 class Agent:
-    def __init__(self, model: Literal['gpt-4', 'gpt-4-turbo-preview']):
+    def __init__(self, model: Literal['gpt-4', 'gpt-4-turbo-preview'], timeout=None):
         self.model = model
+        self.timeout = timeout
 
     def oneshot_sync(self, prompt: str, query: str) -> str:
         return self.multishot_sync([
@@ -45,6 +46,7 @@ class Agent:
         completion = client.chat.completions.create(
             model=self.model,
             messages=messages,
+            timeout=self.timeout
         )
         result = completion.choices[0].message.content
         return result
@@ -54,6 +56,7 @@ class Agent:
         gen = client.chat.completions.create(
             model=self.model,
             messages=messages,
+            timeout=self.timeout,
             stream=True
         )
         for chunk in gen:
