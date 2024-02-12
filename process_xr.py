@@ -28,9 +28,14 @@ import pdb
 
 def handle_netcdf(meta: Meta, agent: Agent) -> AnnotationSchema:
     data = xr.open_dataset(meta.path)
-    pdb.set_trace()
+    return handle_dataset(data, meta, agent)
 
 
 def handle_geotiff(meta: Meta, agent: Agent) -> AnnotationSchema:
     data = xr.open_rasterio(meta.path)
+    return handle_dataset(data, meta, agent)
+
+
+def handle_dataset(data: xr.Dataset, meta: Meta, agent: Agent) -> AnnotationSchema:
     pdb.set_trace()
+    return AnnotationSchema()
