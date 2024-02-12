@@ -1,3 +1,9 @@
+# python cache
 __pycache__/
 
+# don't commit the data
 datasets/
+
+# autoenv scripts
+.autoenv
+.autoleave
