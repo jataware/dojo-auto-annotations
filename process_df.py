@@ -246,40 +246,48 @@ I need to identify the type of feature information it contains.\
             ))
 
     # identify geo column pairs/groups
+    # TODO: really only lat/lon should get paired up. if there are multiple lat/lon columns, need llm to pick out which ones are pairs
     remaining_unpaired = [*geo_annotations]
-    geo_pairs = []
-    geo_type_sets: list[tuple[set[GeoType], list[GeoAnnotation]]] = [
-        ({GeoType.LATITUDE, GeoType.LONGITUDE}, []),
-        ({GeoType.CITY, GeoType.STATE, GeoType.COUNTRY, GeoType.COUNTY}, []),
-    ]
-    isolated_columns = []
+    # geo_pairs = []
+    latlon_columns = []
+    # geo_type_sets: list[tuple[set[GeoType], list[GeoAnnotation]]] = [
+    # ({GeoType.LATITUDE, GeoType.LONGITUDE}, []),
+    # ({GeoType.CITY, GeoType.STATE, GeoType.COUNTRY, GeoType.COUNTY}, []),
+    # ]
+    isolated_geo_columns = []
     for geo in geo_annotations:
-        for groupings, matches in geo_type_sets:
-            if geo.geo_type in groupings:
-                matches.append(geo)
-                break
+        # for groupings, matches in geo_type_sets:
+        if geo.geo_type == GeoType.LATITUDE or geo.geo_type == GeoType.LONGITUDE:
+            latlon_columns.append(geo)
         else:
-            isolated_columns.append(geo)
+            isolated_geo_columns.append(geo)
 
     pdb.set_trace()
 
-    while len(remaining_unpaired) > 0:
-        cur = remaining_unpaired.pop()
-        pdb.set_trace()
-        candidates = []  # based on the identified geo type's that could be paired together
-        identify_column_groups(
-            agent, df, cur.name, meta,
-            [i.name for i in remaining_unpaired],
-            '''\
-            '''
-        )
-        cur.name
+    # while len(remaining_unpaired) > 0:
+    #     cur = remaining_unpaired.pop()
+    #     pdb.set_trace()
+    #     candidates = []  # based on the identified geo type's that could be paired together
+    #     identify_column_groups(
+    #         agent, df, cur.name, meta,
+    #         [i.name for i in remaining_unpaired],
+    #         '''\
+    #         '''
+    #     )
+    #     cur.name
 
     # identify primary geo
 
-    # handling latlon vs lonlat
+    # handling latlon vs lonlat in single coordinate column
 
     # identify date column pairs/groups
+    date_columns = []
+    isolated_date_columns = []
+    for date in date_annotations:
+        if date.date_type == DateType.YEAR or date.date_type == DateType.MONTH or date.date_type == DateType.DAY:
+            date_columns.append(date)
+        else:
+            isolated_date_columns.append(date)
 
     # identify primary date
 
