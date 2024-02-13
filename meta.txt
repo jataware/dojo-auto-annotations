@@ -7,6 +7,15 @@ Description: UNHCR internally displaced people (IDP)s by country and year of ori
 Name: U.S. Military Bases Abroad, 2015 and 2021
 Description: This dataset provides a count of U.S. military bases abroad by country for 2015 and 2021.
 
+[mock_aqi.csv]
+Name: Air Quality Index
+Description: This dataset represents daily air quality observations collected from various monitoring stations across different cities worldwide. Each row corresponds to a single observation with details about the date, time, and location of the observation, along with specific air quality metrics and conditions.
+
+
+[mock_aqi2.csv]
+Name: Air Quality Index
+Description: This dataset represents daily air quality observations collected from various monitoring stations across different cities worldwide. Each row corresponds to a single observation with details about the date, time, and location of the observation, along with specific air quality metrics and conditions.
+
 
 [2019-10-29-2022-10-31_worldwide.csv]
 Name: ACLED 2019-2022

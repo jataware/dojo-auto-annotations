@@ -87,6 +87,56 @@ Select one of the following options: {', '.join(options)} or None: \
     return res
 
 
+def identify_column_groups(agent: Agent, df: pd.DataFrame, col: str, meta: Meta, options: list[T], prompt: str) -> T | None:
+    options_or_unsure = options + ['UNSURE']
+    options_or_none = options + ['NONE']
+
+    # initial messages to the llm
+    messages = [
+        Message(Role.system, 'You are a helpful assistant.'),
+        Message(Role.user, f'''\
+I have a dataset called "{meta.name}" with the following description:
+"{meta.description}"
+I have a column called "{col}" with the following values (first 5 rows):
+{df[col].head().to_string()}
+{prompt}
+Please select zero or more of the following options: {', '.join(options)}. If you are unsure, only output UNSURE. Write your answer without any other comments.\
+'''
+                )
+    ]
+
+    # ask the model to identify the type of the column
+    res = agent.multishot_sync(messages)
+
+    pdb.set_trace()
+#     # reprompt the LLM if it didn't give a valid answer
+#     if res not in options_or_unsure:
+#         messages.append(Message(Role.assistant, res))
+#         messages.append(Message(
+#             Role.system, f'`{res}` is not a valid answer. Please select one of the following options: {", ".join(options)}, or UNSURE. Write your answer without any other comments.'))
+#         res = agent.multishot_sync(messages)
+
+#     # if it failed a second time, just set it to UNSURE
+#     if res not in options_or_unsure:
+#         res = 'UNSURE'
+
+#     # have the user fill in the answer if the LLM was unsure or failed twice
+#     while res not in options_or_none:
+#         res = ask_user(f'''\
+# The LLM was unsure about the date type for "{col}" with the following values (first 5 rows):
+# {df[col].head().to_string()}
+# {prompt=}
+# Select one of the following options: {', '.join(options)} or None: \
+# ''')
+#         res = res.upper()
+#         if res not in options_or_none:
+#             print(f'invalid option: `{res}` out of {options=}')
+
+#     if res == 'NONE':
+#         return None
+#     return res
+
+
 def handle_df(df: pd.DataFrame, meta: Meta, agent: Agent) -> AnnotationSchema:
     # map from all ColumnType keys to empty lists
     column_type_map = {col_type.name: [] for col_type in ColumnType}
@@ -95,7 +145,7 @@ def handle_df(df: pd.DataFrame, meta: Meta, agent: Agent) -> AnnotationSchema:
         col_type = identify_column_type(
             agent, df, col, meta,
             enum_to_keys(ColumnType),
-            'I need to determine if this column contains geographic information, date/time information, or feature information.'
+            'I need to determine if this column contains geographic information, date/time information, or feature information. If it is not obviously geo or time related, then it is probably a feature column.'
         )
         print(f'LLM identified column "{col}" as a {col_type}')
         column_type_map[col_type].append(col)
@@ -196,8 +246,38 @@ I need to identify the type of feature information it contains.\
             ))
 
     # identify geo column pairs/groups
+    remaining_unpaired = [*geo_annotations]
+    geo_pairs = []
+    geo_type_sets: list[tuple[set[GeoType], list[GeoAnnotation]]] = [
+        ({GeoType.LATITUDE, GeoType.LONGITUDE}, []),
+        ({GeoType.CITY, GeoType.STATE, GeoType.COUNTRY, GeoType.COUNTY}, []),
+    ]
+    isolated_columns = []
+    for geo in geo_annotations:
+        for groupings, matches in geo_type_sets:
+            if geo.geo_type in groupings:
+                matches.append(geo)
+                break
+        else:
+            isolated_columns.append(geo)
+
+    pdb.set_trace()
+
+    while len(remaining_unpaired) > 0:
+        cur = remaining_unpaired.pop()
+        pdb.set_trace()
+        candidates = []  # based on the identified geo type's that could be paired together
+        identify_column_groups(
+            agent, df, cur.name, meta,
+            [i.name for i in remaining_unpaired],
+            '''\
+            '''
+        )
+        cur.name
 
     # identify primary geo
+
+    # handling latlon vs lonlat
 
     # identify date column pairs/groups
 
