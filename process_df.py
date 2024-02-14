@@ -356,8 +356,6 @@ I need to identify the type of feature information it contains.\
 
     # identify the format string of DateType.DATE columns
 
-    pdb.set_trace()
-
     return AnnotationSchema(
         geo=geo_annotations,
         date=date_annotations,

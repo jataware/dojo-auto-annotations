@@ -37,16 +37,17 @@ def main():
             m.description = shorten_description(m, agent)
 
         if m.path.suffix == '.csv':
-            handle_csv(m, agent)
+            annotations = handle_csv(m, agent)
         elif m.path.suffix == '.xlsx':
-            handle_xlsx(m, agent)
+            annotations = handle_xlsx(m, agent)
         elif m.path.suffix == '.nc':
-            handle_netcdf(m, agent)
+            annotations = handle_netcdf(m, agent)
         elif m.path.suffix == '.tif' or m.path.suffix == '.tiff':
-            handle_geotiff(m, agent)
+            annotations = handle_geotiff(m, agent)
         else:
             raise ValueError(f'Unhandled file type: {m.path.suffix}')
 
+        print(annotations)
 
 def shorten_description(meta: Meta, agent: Agent) -> str:
     desc = agent.oneshot_sync('You are a helpful assistant.', f'''\
