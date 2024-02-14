@@ -4,7 +4,7 @@ from agent import Message, Role, Agent
 from meta import Meta
 import pandas as pd
 from typing import TypeVar
-from utils import enum_to_keys, ask_user
+from utils import enum_to_keys, ask_user, inplace_replace
 
 from MetadataSchema import (
     AnnotationSchema,
@@ -87,28 +87,28 @@ Select one of the following options: {', '.join(options)} or None: \
     return res
 
 
-def identify_column_groups(agent: Agent, df: pd.DataFrame, col: str, meta: Meta, options: list[T], prompt: str) -> T | None:
-    options_or_unsure = options + ['UNSURE']
-    options_or_none = options + ['NONE']
+# def identify_column_groups(agent: Agent, df: pd.DataFrame, col: str, meta: Meta, options: list[T], prompt: str) -> T | None:
+#     options_or_unsure = options + ['UNSURE']
+#     options_or_none = options + ['NONE']
 
-    # initial messages to the llm
-    messages = [
-        Message(Role.system, 'You are a helpful assistant.'),
-        Message(Role.user, f'''\
-I have a dataset called "{meta.name}" with the following description:
-"{meta.description}"
-I have a column called "{col}" with the following values (first 5 rows):
-{df[col].head().to_string()}
-{prompt}
-Please select zero or more of the following options: {', '.join(options)}. If you are unsure, only output UNSURE. Write your answer without any other comments.\
-'''
-                )
-    ]
+#     # initial messages to the llm
+#     messages = [
+#         Message(Role.system, 'You are a helpful assistant.'),
+#         Message(Role.user, f'''\
+# I have a dataset called "{meta.name}" with the following description:
+# "{meta.description}"
+# I have a column called "{col}" with the following values (first 5 rows):
+# {df[col].head().to_string()}
+# {prompt}
+# Please select zero or more of the following options: {', '.join(options)}. If you are unsure, only output UNSURE. Write your answer without any other comments.\
+# '''
+#                 )
+#     ]
 
-    # ask the model to identify the type of the column
-    res = agent.multishot_sync(messages)
+#     # ask the model to identify the type of the column
+#     res = agent.multishot_sync(messages)
 
-    pdb.set_trace()
+#     pdb.set_trace()
 #     # reprompt the LLM if it didn't give a valid answer
 #     if res not in options_or_unsure:
 #         messages.append(Message(Role.assistant, res))
@@ -245,15 +245,9 @@ I need to identify the type of feature information it contains.\
                 qualifierrole=None,
             ))
 
-    # identify geo column pairs/groups
-    # TODO: really only lat/lon should get paired up. if there are multiple lat/lon columns, need llm to pick out which ones are pairs
-    remaining_unpaired = [*geo_annotations]
-    # geo_pairs = []
-    latlon_columns = []
-    # geo_type_sets: list[tuple[set[GeoType], list[GeoAnnotation]]] = [
-    # ({GeoType.LATITUDE, GeoType.LONGITUDE}, []),
-    # ({GeoType.CITY, GeoType.STATE, GeoType.COUNTRY, GeoType.COUNTY}, []),
-    # ]
+
+    # identify geo lat/lon column pairs
+    latlon_columns: list[GeoAnnotation] = []
     isolated_geo_columns = []
     for geo in geo_annotations:
         # for groupings, matches in geo_type_sets:
@@ -262,26 +256,59 @@ I need to identify the type of feature information it contains.\
         else:
             isolated_geo_columns.append(geo)
 
-    pdb.set_trace()
 
-    # while len(remaining_unpaired) > 0:
-    #     cur = remaining_unpaired.pop()
-    #     pdb.set_trace()
-    #     candidates = []  # based on the identified geo type's that could be paired together
-    #     identify_column_groups(
-    #         agent, df, cur.name, meta,
-    #         [i.name for i in remaining_unpaired],
-    #         '''\
-    #         '''
-    #     )
-    #     cur.name
+    latlon_pairs: list[tuple[GeoAnnotation, GeoAnnotation]] = []
+    geo_type_match_map = {
+        GeoType.LATITUDE: GeoType.LONGITUDE,
+        GeoType.LONGITUDE: GeoType.LATITUDE,
+    }
+    while len(latlon_columns) > 0:
+        cur = latlon_columns.pop()
+        candidates = [i for i in latlon_columns if i.geo_type == geo_type_match_map[cur.geo_type]]
+        if len(candidates) == 1:
+            #TBD: could have the llm check here if this is a valid match. probably not necessary though
+            match, = candidates
+            latlon_columns.remove(match)
 
-    # identify primary geo
+            # ensure lat is first in the pair
+            latlon_pairs.append((cur, match))
+            continue
+
+        if len(candidates) == 0:
+            isolated_geo_columns.append(cur)
+            continue
+
+        pdb.set_trace()
+        #TODO: else ask the llm to pick the best matching pair if any
+        raise NotImplementedError('need to ask the llm to pick the best matching lat/lon pair if any')
+
+    # mark the pairs in the geo annotations (revalidate each annotation with the new info)
+    for c0, c1 in latlon_pairs:
+        inplace_replace(
+            geo_annotations,
+            c0,
+            GeoAnnotation(**{
+                **c0.model_dump(),
+                'is_geo_pair': c1.name
+            })
+        )
+        #TODO: for now, only one column gets the is_geo_pair attribute
+        # inplace_replace(
+        #     geo_annotations,
+        #     c1,
+        #     GeoAnnotation(**{
+        #         **c1.model_dump(),
+        #         'is_geo_pair': c0.name
+        #     })
+        # )
+
+
 
     # handling latlon vs lonlat in single coordinate column
+    # TODO:...
 
     # identify date column pairs/groups
-    date_columns = []
+    date_columns: list[DateAnnotation] = []
     isolated_date_columns = []
     for date in date_annotations:
         if date.date_type == DateType.YEAR or date.date_type == DateType.MONTH or date.date_type == DateType.DAY:
@@ -289,7 +316,45 @@ I need to identify the type of feature information it contains.\
         else:
             isolated_date_columns.append(date)
 
+
+    date_groups: list[tuple[DateAnnotation,...]] = []
+    while len(date_columns) > 0:
+        cur = date_columns.pop()
+        candidates = [i for i in date_columns if i.date_type != cur.date_type]
+        # if the date type of each candidate is unique, and there are 1 or 2 of them, group with cur
+        if len(candidates) in (1, 2) and len({i.date_type for i in candidates}) == len(candidates):
+            date_groups.append((cur, *candidates))
+            for i in candidates:
+                date_columns.remove(i)
+            continue
+        
+        if len(candidates) == 0:
+            isolated_date_columns.append(cur)
+            continue
+
+        pdb.set_trace()
+        # TODO: else ask the llm to pick the best matching group if any
+        raise NotImplementedError('need to ask the llm to pick the best matching DATE group if any')
+    
+    # mark the groups in the date annotations (revalidate each annotation with the new info)
+    for group in date_groups:
+        # for date in group:
+            date = group[0] #TODO: for now just take the first column as the one marked with the associated columns
+            others = [i for i in group if i != date]
+            inplace_replace(
+                date_annotations,
+                date,
+                DateAnnotation(**{
+                    **date.model_dump(),
+                    # Dirty hack: convert DateType to TimeField. 
+                    # For now, we can only identify year, month, day groups. No hour or, minute columns
+                    'associated_columns': {TimeField[i.date_type.name]: i.name for i in others}
+                })
+            )
+
     # identify primary date
+
+    # identify the format string of DateType.DATE columns
 
     pdb.set_trace()
 
