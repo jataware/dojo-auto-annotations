@@ -355,6 +355,28 @@ I need to identify the type of feature information it contains.\
     # identify primary date
 
     # identify the format string of DateType.DATE columns
+    for date in date_annotations:
+        if date.date_type in (DateType.YEAR, DateType.MONTH, DateType.DAY, DateType.DATE):
+            col = date.name
+            fmt = agent.oneshot_sync('You are a helpful assistant.', f'''\
+I'm looking at a dataset called "{meta.name}".  I have a column called "{col}" with the following values (first 5 rows):
+{df[col].head().to_string()}
+The column has been identified as containing date/time information, and has been marked as a {date.date_type.name} column.
+I need to identify the strftime format for this field. Without any other comments, please output a valid strftime format string or UNSURE if you are unsure.
+'''
+            )
+            if fmt == 'UNSURE':
+                continue #TODO: could ask the user here. For now just skip
+
+            inplace_replace(
+                date_annotations,
+                date,
+                DateAnnotation(**{
+                    **date.model_dump(),
+                    'time_format': fmt
+                })
+            )
+
 
     return AnnotationSchema(
         geo=geo_annotations,
