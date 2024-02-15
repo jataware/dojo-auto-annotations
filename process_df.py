@@ -366,6 +366,7 @@ I need to identify the strftime format for this field. Without any other comment
 '''
             )
             if fmt == 'UNSURE':
+                print(f'LLM was unsure about the time format for {date.date_type.name} column "{col}"')
                 continue #TODO: could ask the user here. For now just skip
 
             inplace_replace(
