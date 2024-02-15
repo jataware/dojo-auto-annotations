@@ -309,7 +309,7 @@ I need to identify the type of feature information it contains.\
 
     # identify date column pairs/groups
     date_columns: list[DateAnnotation] = []
-    isolated_date_columns = []
+    isolated_date_columns: list[DateAnnotation] = []
     for date in date_annotations:
         if date.date_type == DateType.YEAR or date.date_type == DateType.MONTH or date.date_type == DateType.DAY:
             date_columns.append(date)
@@ -337,22 +337,85 @@ I need to identify the type of feature information it contains.\
         raise NotImplementedError('need to ask the llm to pick the best matching DATE group if any')
     
     # mark the groups in the date annotations (revalidate each annotation with the new info)
-    for group in date_groups:
+    for i, group in enumerate(date_groups):
         # for date in group:
             date = group[0] #TODO: for now just take the first column as the one marked with the associated columns
             others = [i for i in group if i != date]
             inplace_replace(
                 date_annotations,
                 date,
-                DateAnnotation(**{
+                new_date:=DateAnnotation(**{
                     **date.model_dump(),
                     # Dirty hack: convert DateType to TimeField. 
                     # For now, we can only identify year, month, day groups. No hour or, minute columns
                     'associated_columns': {TimeField[i.date_type.name]: i.name for i in others}
                 })
             )
+            #have to update the group with the new date
+            date_groups[i] = (new_date, *others)
+    
 
     # identify primary date
+    group_candidates_str = [tuple(date.name for date in group) for group in date_groups]
+    isolated_candidates_str = [date.name for date in isolated_date_columns]
+    candidates_str = group_candidates_str + isolated_candidates_str
+    if len(candidates_str) == 1:
+        if len(isolated_date_columns) == 1:
+            inplace_replace(
+                date_annotations,
+                isolated_date_columns[0],
+                DateAnnotation(**{
+                    **isolated_date_columns[0].model_dump(),
+                    'primary_date': True
+                })
+            )
+        else:
+            group, = date_groups
+            for date in group:
+                inplace_replace(
+                    date_annotations,
+                    date,
+                    DateAnnotation(**{
+                        **date.model_dump(),
+                        'primary_date': True
+                    })
+                )
+
+    elif len(candidates_str) > 1:
+        primary_col = agent.oneshot_sync('You are a helpful assistant.', f'''\
+I'm looking at a dataset called "{meta.name}".  I have the following date columns:
+{', '.join([ f'{i}:{col}' for i, col in enumerate(candidates_str)])} (noting that columns part of a group are listed together)
+Without any other comments, please select the index of the most likely primary date column(s) from the list above, i.e. please output a single integer with your selection. 
+''')
+        try:
+            primary_col = int(primary_col)
+            if primary_col < 0 or primary_col >= len(candidates_str):
+                raise ValueError(f'LLM provided out of range index for primary date column. {primary_col=} out of {candidates_str=}')
+            if primary_col < len(group_candidates_str):
+                group = date_groups[primary_col]
+                for date in group:
+                    inplace_replace(
+                        date_annotations,
+                        date,
+                        DateAnnotation(**{
+                            **date.model_dump(),
+                            'primary_date': True
+                        })
+                    )
+            else:
+                primary_col -= len(group_candidates_str)
+                inplace_replace(
+                    date_annotations,
+                    isolated_date_columns[primary_col],
+                    DateAnnotation(**{
+                        **isolated_date_columns[primary_col].model_dump(),
+                        'primary_date': True
+                    })
+                )
+            print(f'LLM identified {candidates_str[primary_col]} as the primary date column(s)')
+        except Exception as e:
+            pdb.set_trace()
+            print(e)
 
     # identify the format string of DateType.DATE columns
     for date in date_annotations:
@@ -378,7 +441,7 @@ I need to identify the strftime format for this field. Without any other comment
                 })
             )
 
-
+    pdb.set_trace()
     return AnnotationSchema(
         geo=geo_annotations,
         date=date_annotations,
