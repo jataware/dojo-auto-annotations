@@ -101,28 +101,25 @@ def handle_df(df: pd.DataFrame, meta: Meta, agent: Agent) -> AnnotationSchema:
         print(f'LLM identified column "{col}" as a {col_type}')
         column_type_map[col_type].append(col)
 
-    ##### determine the type of date column for each #####
-    # date_type_map = {date_type.name: [] for date_type in DateType}
-    date_type_map = {}
 
+    # determine the type of date column for each
+    date_type_map = {}
     for col in column_type_map['DATE']:
         date_type = identify_column_type(
             agent, df, col, meta,
-            enum_to_keys(DateType),
+            enum_to_keys(DateType) + ['TIME'], # give the LLM an option for time-like columns, which we will treat as DATE
             '''\
 The column has been identified as containing date/time information.
 I need to identify the type of date/time information it contains.\
             '''
         )
+        if date_type == 'TIME': date_type = 'DATE' # metadata currently treats times as just DATE
         print(f'LLM identified DATE column "{col}" as a {date_type}')
         date_type_map[col] = date_type
 
-    ##### TODO: identifying the primary time column or if they need to be built #####
 
-    ##### identifying the type of geo column for each #####
-    # geo_type_map = {geo_type.name: [] for geo_type in GeoType}
+    # identifying the type of geo column for each
     geo_type_map = {}
-
     for col in column_type_map['GEO']:
         geo_type = identify_column_type(
             agent, df, col, meta,
@@ -135,10 +132,8 @@ I need to identify the type of geographic information it contains.\
         print(f'LLM identified GEO column "{col}" as a {geo_type}')
         geo_type_map[col] = geo_type
 
-    ##### identifying the type of feature column for each #####
-    # feature_type_map = {feature_type.name: [] for feature_type in FeatureType}
+    # identifying the type of feature column for each
     feature_type_map = {}
-
     for col in column_type_map['FEATURE']:
         feature_type = identify_column_type(
             agent, df, col, meta,
@@ -151,11 +146,15 @@ I need to identify the type of feature information it contains.\
         print(f'LLM identified FEATURE column "{col}" as a {feature_type}')
         feature_type_map[col] = feature_type
 
+
+    # create the annotations for each column
     geo_annotations: list[GeoAnnotation] = []
-    geo_idxs: dict[str, int] = {}
     date_annotations: list[DateAnnotation] = []
-    date_idxs: dict[str, int] = {}
     feature_annotations: list[FeatureAnnotation] = []
+
+    # maps used to keep track of each annotation's index given its column name
+    geo_idxs: dict[str, int] = {}
+    date_idxs: dict[str, int] = {}
     feature_idxs: dict[str, int] = {}
 
     for col in column_type_map['DATE']:
@@ -270,9 +269,6 @@ I need to identify the type of feature information it contains.\
     # TODO:...
         
     # identify the primary geo
-    # latlon_pair_candidates_str = [tuple(coord for coord in group) for group in latlon_pairs]
-    # isolated_geo_candidates_str = [date.name for date in isolated_geo_columns]
-    # geo_candidates_str = latlon_pair_candidates_str + isolated_geo_candidates_str
     geo_candidates_str = latlon_pairs + isolated_geo_columns
     #TODO:...
     
@@ -328,32 +324,26 @@ I need to identify the type of feature information it contains.\
     
 
     # identify primary date
-    # date_group_candidates_str = [tuple(date.name for date in group) for group in date_groups]
-    # isolated_date_candidates_str = [date.name for date in isolated_date_columns]
     date_candidates_str = date_groups + isolated_date_columns
+
+    def mark_as_primary(date_name: str):
+        date = date_annotations[date_idxs[date_name]]
+        inplace_replace(
+            date_annotations,
+            date,
+            DateAnnotation(**{
+                **date.model_dump(),
+                'primary_date': True
+            })
+        )
+
     if len(date_candidates_str) == 1:
         if len(isolated_date_columns) == 1:
-            annotation = date_annotations[date_idxs[isolated_date_columns[0]]]
-            inplace_replace(
-                date_annotations,
-                annotation,
-                DateAnnotation(**{
-                    **annotation.model_dump(),
-                    'primary_date': True
-                })
-            )
+            mark_as_primary(isolated_date_columns[0])
         else:
             group, = date_groups
             for date_name in group:
-                date = date_annotations[date_idxs[date_name]]
-                inplace_replace(
-                    date_annotations,
-                    date,
-                    DateAnnotation(**{
-                        **date.model_dump(),
-                        'primary_date': True
-                    })
-                )
+                mark_as_primary(date_name)
 
     elif len(date_candidates_str) > 1:
         primary_col = agent.oneshot_sync('You are a helpful assistant.', f'''\
@@ -368,26 +358,11 @@ Without any other comments, please select the index of the most likely primary d
             if primary_col < len(date_groups):
                 group_names = date_groups[primary_col]
                 for date_name in group_names:
-                    date = date_annotations[date_idxs[date_name]]
-                    inplace_replace(
-                        date_annotations,
-                        date,
-                        DateAnnotation(**{
-                            **date.model_dump(),
-                            'primary_date': True
-                        })
-                    )
+                    mark_as_primary(date_name)
             else:
                 primary_col -= len(date_groups)
-                annotation = date_annotations[date_idxs[isolated_date_columns[primary_col]]]
-                inplace_replace(
-                    date_annotations,
-                    annotation,
-                    DateAnnotation(**{
-                        **annotation.model_dump(),
-                        'primary_date': True
-                    })
-                )
+                mark_as_primary(isolated_date_columns[primary_col])
+              
             print(f'LLM identified {date_candidates_str[primary_col]} as the primary date column(s)')
         except Exception as e:
             pdb.set_trace()
@@ -423,6 +398,8 @@ I need to identify the strftime format for this field. Without any other comment
                     'time_format': fmt
                 })
             )
+
+            print(f'LLM identified {date.type.name}/{date.date_type.name} column "{col}" strftime format: "{fmt}"')
 
     pdb.set_trace()
     return AnnotationSchema(
