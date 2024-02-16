@@ -164,6 +164,7 @@ I need to identify the type of feature information it contains.\
                 name=col,
                 display_name=None,
                 description=None,
+                type=ColumnType.DATE.value,
                 date_type=DateType[date_type_map[col]].value,
                 primary_date=None,
                 time_format='todo',  # have the llm figure this part out
@@ -178,6 +179,7 @@ I need to identify the type of feature information it contains.\
                 name=col,
                 display_name=None,
                 description=None,
+                type=ColumnType.GEO.value,
                 geo_type=GeoType[geo_type_map[col]].value,
                 primary_geo=None,
                 resolve_to_gadm=None,
@@ -194,6 +196,7 @@ I need to identify the type of feature information it contains.\
                 name=col,
                 display_name=None,
                 description='todo feature description',  # need llm to pick this before making the annotation
+                type=ColumnType.FEATURE.value,
                 feature_type=FeatureType[feature_type_map[col]].value,
                 units=None,
                 units_description=None,
@@ -270,8 +273,50 @@ I need to identify the type of feature information it contains.\
         
     # identify the primary geo
     geo_candidates_str = latlon_pairs + isolated_geo_columns
-    #TODO:...
-    
+
+    def mark_as_primary(geo_name: str):
+        geo = geo_annotations[geo_idxs[geo_name]]
+        inplace_replace(
+            geo_annotations,
+            geo,
+            GeoAnnotation(**{
+                **geo.model_dump(),
+                'primary_geo': True
+            })
+        )
+
+    if len(geo_candidates_str) == 1:
+        if len(isolated_geo_columns) == 1:
+            mark_as_primary(isolated_geo_columns[0])
+        else:
+            group, = latlon_pairs
+            for geo_name in group:
+                mark_as_primary(geo_name)
+
+    elif len(geo_candidates_str) > 1:
+        primary_col = agent.oneshot_sync('You are a helpful assistant.', f'''\
+I'm looking at a dataset called "{meta.name}".  I have the following geo columns:
+{', '.join([ f'{i}:{col}' for i, col in enumerate(geo_candidates_str)])} (noting that columns part of a group are listed together)
+Without any other comments, please select the index of the most likely primary geo column(s) from the list above, i.e. please output a single integer with your selection.
+'''
+        )
+        try:
+            primary_col = int(primary_col)
+            if primary_col < 0 or primary_col >= len(geo_candidates_str):
+                raise ValueError(f'LLM provided out of range index for primary geo column. {primary_col=} out of {geo_candidates_str=}')
+            if primary_col < len(latlon_pairs):
+                group_names = latlon_pairs[primary_col]
+                for geo_name in group_names:
+                    mark_as_primary(geo_name)
+            else:
+                primary_col -= len(latlon_pairs)
+                mark_as_primary(isolated_geo_columns[primary_col])
+              
+            print(f'LLM identified {geo_candidates_str[primary_col]} as the primary geo column(s)')
+        except Exception as e:
+            pdb.set_trace()
+            print(e)
+
 
     # identify date column pairs/groups
     date_columns: list[str] = []
@@ -388,7 +433,6 @@ I need to identify the strftime format for this field. Without any other comment
 
             #TODO: check if format string is a valid format string
             assert is_valid_strftime_format(fmt), f'LLM provided invalid strftime format string for {date.date_type.name} column "{col}": {fmt}'
-
 
             inplace_replace(
                 date_annotations,
