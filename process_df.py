@@ -4,7 +4,7 @@ from agent import Message, Role, Agent
 from meta import Meta
 import pandas as pd
 from typing import TypeVar
-from utils import enum_to_keys, ask_user, inplace_replace
+from utils import enum_to_keys, ask_user, inplace_replace, is_valid_strftime_format
 
 from MetadataSchema import (
     AnnotationSchema,
@@ -152,11 +152,15 @@ I need to identify the type of feature information it contains.\
         feature_type_map[col] = feature_type
 
     geo_annotations: list[GeoAnnotation] = []
+    geo_idxs: dict[str, int] = {}
     date_annotations: list[DateAnnotation] = []
+    date_idxs: dict[str, int] = {}
     feature_annotations: list[FeatureAnnotation] = []
+    feature_idxs: dict[str, int] = {}
 
     for col in column_type_map['DATE']:
         if date_type_map[col] is not None:
+            date_idxs[col] = len(date_annotations)
             date_annotations.append(DateAnnotation(
                 name=col,
                 display_name=None,
@@ -170,6 +174,7 @@ I need to identify the type of feature information it contains.\
 
     for col in column_type_map['GEO']:
         if geo_type_map[col] is not None:
+            geo_idxs[col] = len(geo_annotations)
             geo_annotations.append(GeoAnnotation(
                 name=col,
                 display_name=None,
@@ -185,6 +190,7 @@ I need to identify the type of feature information it contains.\
 
     for col in column_type_map['FEATURE']:
         if feature_type_map[col] is not None:
+            feature_idxs[col] = len(feature_annotations)
             feature_annotations.append(FeatureAnnotation(
                 name=col,
                 display_name=None,
@@ -198,58 +204,63 @@ I need to identify the type of feature information it contains.\
 
 
     # identify geo lat/lon column pairs
-    latlon_columns: list[GeoAnnotation] = []
-    isolated_geo_columns = []
+    latlon_columns: list[str] = []
+    isolated_geo_columns: list[str] = []
     for geo in geo_annotations:
         # for groupings, matches in geo_type_sets:
         if geo.geo_type == GeoType.LATITUDE or geo.geo_type == GeoType.LONGITUDE:
-            latlon_columns.append(geo)
+            latlon_columns.append(geo.name)
         else:
-            isolated_geo_columns.append(geo)
+            isolated_geo_columns.append(geo.name)
 
 
-    latlon_pairs: list[tuple[GeoAnnotation, GeoAnnotation]] = []
+    latlon_pairs: list[tuple[str, str]] = []
     geo_type_match_map = {
         GeoType.LATITUDE: GeoType.LONGITUDE,
         GeoType.LONGITUDE: GeoType.LATITUDE,
     }
     while len(latlon_columns) > 0:
-        cur = latlon_columns.pop()
-        candidates = [i for i in latlon_columns if i.geo_type == geo_type_match_map[cur.geo_type]]
+        cur_col = latlon_columns.pop()
+        cur = geo_annotations[geo_idxs[cur_col]]
+        candidates = [geo_annotations[geo_idxs[i]] for i in latlon_columns]
+        candidates = [i for i in candidates if i.geo_type == geo_type_match_map[cur.geo_type]]
         if len(candidates) == 1:
             #TBD: could have the llm check here if this is a valid match. probably not necessary though
             match, = candidates
-            latlon_columns.remove(match)
+            latlon_columns.remove(match.name)
 
             # ensure lat is first in the pair
-            latlon_pairs.append((cur, match))
+            latlon_pairs.append((cur.name, match.name))
             continue
 
         if len(candidates) == 0:
-            isolated_geo_columns.append(cur)
+            isolated_geo_columns.append(cur.name)
             continue
 
         pdb.set_trace()
         #TODO: else ask the llm to pick the best matching pair if any
         raise NotImplementedError('need to ask the llm to pick the best matching lat/lon pair if any')
 
+
     # mark the pairs in the geo annotations (revalidate each annotation with the new info)
-    for c0, c1 in latlon_pairs:
+    for c0_name, c1_name in latlon_pairs:
+        c0 = geo_annotations[geo_idxs[c0_name]]
         inplace_replace(
             geo_annotations,
             c0,
             GeoAnnotation(**{
                 **c0.model_dump(),
-                'is_geo_pair': c1.name
+                'is_geo_pair': c1_name
             })
         )
         #TODO: for now, only one column gets the is_geo_pair attribute
+        # c1 = geo_annotations[geo_idxs[c1_name]]
         # inplace_replace(
         #     geo_annotations,
         #     c1,
         #     GeoAnnotation(**{
         #         **c1.model_dump(),
-        #         'is_geo_pair': c0.name
+        #         'is_geo_pair': c0_name
         #     })
         # )
 
@@ -257,30 +268,40 @@ I need to identify the type of feature information it contains.\
 
     # handling latlon vs lonlat in single coordinate column
     # TODO:...
+        
+    # identify the primary geo
+    # latlon_pair_candidates_str = [tuple(coord for coord in group) for group in latlon_pairs]
+    # isolated_geo_candidates_str = [date.name for date in isolated_geo_columns]
+    # geo_candidates_str = latlon_pair_candidates_str + isolated_geo_candidates_str
+    geo_candidates_str = latlon_pairs + isolated_geo_columns
+    #TODO:...
+    
 
     # identify date column pairs/groups
-    date_columns: list[DateAnnotation] = []
-    isolated_date_columns: list[DateAnnotation] = []
+    date_columns: list[str] = []
+    isolated_date_columns: list[str] = []
     for date in date_annotations:
         if date.date_type == DateType.YEAR or date.date_type == DateType.MONTH or date.date_type == DateType.DAY:
-            date_columns.append(date)
+            date_columns.append(date.name)
         else:
-            isolated_date_columns.append(date)
+            isolated_date_columns.append(date.name)
 
 
-    date_groups: list[tuple[DateAnnotation,...]] = []
+    date_groups: list[tuple[str,...]] = []
     while len(date_columns) > 0:
-        cur = date_columns.pop()
-        candidates = [i for i in date_columns if i.date_type != cur.date_type]
+        cur_name = date_columns.pop()
+        cur = date_annotations[date_idxs[cur_name]]
+        candidates = [date_annotations[date_idxs[i]] for i in date_columns]
+        candidates = [i for i in candidates if i.date_type != cur.date_type]
         # if the date type of each candidate is unique, and there are 1 or 2 of them, group with cur
         if len(candidates) in (1, 2) and len({i.date_type for i in candidates}) == len(candidates):
-            date_groups.append((cur, *candidates))
+            date_groups.append((cur.name, *[c.name for c in candidates]))
             for i in candidates:
-                date_columns.remove(i)
+                date_columns.remove(i.name)
             continue
         
         if len(candidates) == 0:
-            isolated_date_columns.append(cur)
+            isolated_date_columns.append(cur.name)
             continue
 
         pdb.set_trace()
@@ -288,41 +309,43 @@ I need to identify the type of feature information it contains.\
         raise NotImplementedError('need to ask the llm to pick the best matching DATE group if any')
     
     # mark the groups in the date annotations (revalidate each annotation with the new info)
-    for i, group in enumerate(date_groups):
-        # for date in group:
-            date = group[0] #TODO: for now just take the first column as the one marked with the associated columns
-            others = [i for i in group if i != date]
+    for group in date_groups:
+        # for date_name in group:
+            date_name = group[0] #TODO: for now just take the first column as the one marked with the associated columns
+            date = date_annotations[date_idxs[date_name]]
+            other_names = [i for i in group if i != date]
+            others = [date_annotations[date_idxs[i]] for i in other_names]
             inplace_replace(
                 date_annotations,
                 date,
-                new_date:=DateAnnotation(**{
+                DateAnnotation(**{
                     **date.model_dump(),
                     # Dirty hack: convert DateType to TimeField. 
                     # For now, we can only identify year, month, day groups. No hour or, minute columns
                     'associated_columns': {TimeField[i.date_type.name]: i.name for i in others}
                 })
             )
-            #have to update the group with the new date
-            date_groups[i] = (new_date, *others)
     
 
     # identify primary date
-    group_candidates_str = [tuple(date.name for date in group) for group in date_groups]
-    isolated_candidates_str = [date.name for date in isolated_date_columns]
-    candidates_str = group_candidates_str + isolated_candidates_str
-    if len(candidates_str) == 1:
+    # date_group_candidates_str = [tuple(date.name for date in group) for group in date_groups]
+    # isolated_date_candidates_str = [date.name for date in isolated_date_columns]
+    date_candidates_str = date_groups + isolated_date_columns
+    if len(date_candidates_str) == 1:
         if len(isolated_date_columns) == 1:
+            annotation = date_annotations[date_idxs[isolated_date_columns[0]]]
             inplace_replace(
                 date_annotations,
-                isolated_date_columns[0],
+                annotation,
                 DateAnnotation(**{
-                    **isolated_date_columns[0].model_dump(),
+                    **annotation.model_dump(),
                     'primary_date': True
                 })
             )
         else:
             group, = date_groups
-            for date in group:
+            for date_name in group:
+                date = date_annotations[date_idxs[date_name]]
                 inplace_replace(
                     date_annotations,
                     date,
@@ -332,19 +355,20 @@ I need to identify the type of feature information it contains.\
                     })
                 )
 
-    elif len(candidates_str) > 1:
+    elif len(date_candidates_str) > 1:
         primary_col = agent.oneshot_sync('You are a helpful assistant.', f'''\
 I'm looking at a dataset called "{meta.name}".  I have the following date columns:
-{', '.join([ f'{i}:{col}' for i, col in enumerate(candidates_str)])} (noting that columns part of a group are listed together)
+{', '.join([ f'{i}:{col}' for i, col in enumerate(date_candidates_str)])} (noting that columns part of a group are listed together)
 Without any other comments, please select the index of the most likely primary date column(s) from the list above, i.e. please output a single integer with your selection. 
 ''')
         try:
             primary_col = int(primary_col)
-            if primary_col < 0 or primary_col >= len(candidates_str):
-                raise ValueError(f'LLM provided out of range index for primary date column. {primary_col=} out of {candidates_str=}')
-            if primary_col < len(group_candidates_str):
-                group = date_groups[primary_col]
-                for date in group:
+            if primary_col < 0 or primary_col >= len(date_candidates_str):
+                raise ValueError(f'LLM provided out of range index for primary date column. {primary_col=} out of {date_candidates_str=}')
+            if primary_col < len(date_groups):
+                group_names = date_groups[primary_col]
+                for date_name in group_names:
+                    date = date_annotations[date_idxs[date_name]]
                     inplace_replace(
                         date_annotations,
                         date,
@@ -354,16 +378,17 @@ Without any other comments, please select the index of the most likely primary d
                         })
                     )
             else:
-                primary_col -= len(group_candidates_str)
+                primary_col -= len(date_groups)
+                annotation = date_annotations[date_idxs[isolated_date_columns[primary_col]]]
                 inplace_replace(
                     date_annotations,
-                    isolated_date_columns[primary_col],
+                    annotation,
                     DateAnnotation(**{
-                        **isolated_date_columns[primary_col].model_dump(),
+                        **annotation.model_dump(),
                         'primary_date': True
                     })
                 )
-            print(f'LLM identified {candidates_str[primary_col]} as the primary date column(s)')
+            print(f'LLM identified {date_candidates_str[primary_col]} as the primary date column(s)')
         except Exception as e:
             pdb.set_trace()
             print(e)
@@ -372,16 +397,23 @@ Without any other comments, please select the index of the most likely primary d
     for date in date_annotations:
         if date.date_type in (DateType.YEAR, DateType.MONTH, DateType.DAY, DateType.DATE):
             col = date.name
-            fmt = agent.oneshot_sync('You are a helpful assistant.', f'''\
+            response = agent.oneshot_sync('You are a helpful assistant.', f'''\
 I'm looking at a dataset called "{meta.name}".  I have a column called "{col}" with the following values (first 5 rows):
 {df[col].head().to_string()}
 The column has been identified as containing date/time information, and has been marked as a {date.date_type.name} column.
 I need to identify the strftime format for this field. Without any other comments, please output a valid strftime format string or UNSURE if you are unsure.
 '''
             )
-            if fmt == 'UNSURE':
+            if response == 'UNSURE':
                 print(f'LLM was unsure about the time format for {date.date_type.name} column "{col}"')
                 continue #TODO: could ask the user here. For now just skip
+            
+            #strip any wrapping quotes
+            fmt = response.strip('\'"`')
+
+            #TODO: check if format string is a valid format string
+            assert is_valid_strftime_format(fmt), f'LLM provided invalid strftime format string for {date.date_type.name} column "{col}": {fmt}'
+
 
             inplace_replace(
                 date_annotations,
