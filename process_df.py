@@ -297,7 +297,7 @@ I need to identify the type of feature information it contains.\
         primary_col = agent.oneshot_sync('You are a helpful assistant.', f'''\
 I'm looking at a dataset called "{meta.name}".  I have the following geo columns:
 {', '.join([ f'{i}:{col}' for i, col in enumerate(geo_candidates_str)])} (noting that columns part of a group are listed together)
-Without any other comments, please select the index of the most likely primary geo column(s) from the list above, i.e. please output a single integer with your selection.
+Without any other comments, please select the index of the most likely primary geo column(s) from the list above, i.e. please output a single integer (0-{len(geo_candidates_str)-1}) with your selection.
 '''
         )
         try:
@@ -394,7 +394,7 @@ Without any other comments, please select the index of the most likely primary g
         primary_col = agent.oneshot_sync('You are a helpful assistant.', f'''\
 I'm looking at a dataset called "{meta.name}".  I have the following date columns:
 {', '.join([ f'{i}:{col}' for i, col in enumerate(date_candidates_str)])} (noting that columns part of a group are listed together)
-Without any other comments, please select the index of the most likely primary date column(s) from the list above, i.e. please output a single integer with your selection. 
+Without any other comments, please select the index of the most likely primary date column(s) from the list above, i.e. please output a single integer (0-{len(date_candidates_str)-1}) with your selection. 
 ''')
         try:
             primary_col = int(primary_col)
