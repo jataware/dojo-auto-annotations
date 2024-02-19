@@ -27,7 +27,7 @@ def main():
     set_openai_key()
 
     meta = get_meta()
-    meta = [meta[2]]  # debug, look just at one file
+    meta = [meta[3]]  # debug, look just at one file
 
     # shorten the description if necessary
     agent = Agent(model='gpt-4-turbo-preview', timeout=10.0)
@@ -48,6 +48,7 @@ def main():
             raise ValueError(f'Unhandled file type: {m.path.suffix}')
 
         print(annotations)
+
 
 def shorten_description(meta: Meta, agent: Agent) -> str:
     desc = agent.oneshot_sync('You are a helpful assistant.', f'''\
