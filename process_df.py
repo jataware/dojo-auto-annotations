@@ -87,7 +87,7 @@ Select one of the following options: {', '.join(options)} or None: \
     return res
 
 
-def handle_df(df: pd.DataFrame, meta: Meta, agent: Agent) -> AnnotationSchema:
+def OLD_handle_df(df: pd.DataFrame, meta: Meta, agent: Agent) -> AnnotationSchema:
     # map from all ColumnType keys to empty lists
     column_type_map = {col_type.name: [] for col_type in ColumnType}
 
@@ -609,3 +609,156 @@ I need a description for this geo column. Please provide a brief description for
         date=date_annotations,
         feature=feature_annotations
     )
+
+
+def handle_df(df: pd.DataFrame, meta: Meta, agent: Agent) -> AnnotationSchema:
+    """Open ended attempt to get llm to handle the dataframe annotations"""
+
+    import sys
+    from io import StringIO
+    from pathlib import Path
+    import traceback
+    from time import sleep
+
+    # Save the original stdout and stderr
+    original_stdout = sys.stdout
+    original_stderr = sys.stderr
+
+    # Create StringIO objects to capture stdout and stderr
+    captured_stdout = StringIO()
+    captured_stderr = StringIO()
+
+    code_prelude = '''\
+from MetadataSchema import (
+    AnnotationSchema,
+    GeoAnnotation,
+    DateAnnotation,
+    FeatureAnnotation,
+    ColumnType,
+    DateType,
+    GeoType,
+    FeatureType,
+    CoordFormat,
+    GadmLevel,
+    TimeField,
+    LatLong,
+    TimeRange,
+)
+
+geo_annotations: list[GeoAnnotation] = []
+date_annotations: list[DateAnnotation] = []
+feature_annotations: list[FeatureAnnotation] = []
+'''
+    metadata_src = Path('MetadataSchema.py').read_text()
+    chat: list[Message] = [
+        Message(Role.system, f'''\
+You are a data set analyst. You are working with a dataset called "{meta.name}" with the following description:
+"{meta.description}"
+You need to annotate all of the columns in this dataset with appropriate metadata.
+The metadata schema has been defined in a file called "MetadataSchema.py" with the following contents:
+
+```python
+{metadata_src}
+```
+
+You have access to a python environment with a pandas dataframe called `df` containing the data you need to annotate.
+You can execute python commands to interact with the data and built up the metadata for each column.
+The following prelude code has been run in the environment:
+
+```python
+{code_prelude}
+```
+
+and again, the variable `df` has been preloaded with the dataset.
+
+You should output valid python code that will be executed in order to build up the metadata for each column.
+Any output printed to stdout will be captured and added to the chat history for you to see.
+
+For example, if you wanted to look at the contents of the first 5 rows of a column called "column_name", you could execute the following code:
+
+```python
+print(df["column_name"].head())
+```
+
+or for example, if you identify a column as containing geographic information, you should append a GeoAnnotation to the `geo_annotations` list, e.g.:
+
+```python
+geo_annotations.append(GeoAnnotation(
+    name="column_name",
+    display_name=...,
+    description=...,
+    type=ColumnType.GEO,
+    geo_type=...,
+    primary_geo=...,
+    resolve_to_gadm=...,
+    is_geo_pair=...,
+    coord_format=...,
+    qualifies=...,
+    gadm_level=...
+))
+```
+
+Filling in the relevant details for each field based on what is appropriate for the column.
+
+Your output should only contain valid python code with no other comments or text. Your response will be passed directly into exec(). 
+If you have any questions, you may call the `ask()` function with your query as an argument.
+When you have created annotations for all columns, and appended them to the appropriate lists, you should call the `done()` function to indicate that you are finished.\
+''')
+    ]
+
+    # execute the prelude code
+    llm_globals = {}
+    llm_locals = {'df': df}
+    exec(code_prelude, llm_globals, llm_locals)
+
+    # execute the chat
+    while True:
+        sleep(5)
+        response = agent.multishot_sync(chat)
+
+        # remove any wrapping code blocks
+        if response.startswith('```') and response.endswith('```'):
+            lines = response.split('\n')
+            response = '\n'.join(lines[1:-1])
+
+        chat.append(Message(Role.assistant, response))
+        print(f'Assistant:\n{response}' if '\n' in response else f'Assistant: {response}')
+
+        if response.startswith('ask('):
+            response = response[4:-1]
+            pdb.set_trace()
+            ...
+            continue
+        if response.startswith('done()'):
+            pdb.set_trace()
+            ...
+            break
+
+        # execute the response and capture the output
+        try:
+            try:
+                # Redirect stdout and stderr
+                sys.stdout = captured_stdout
+                sys.stderr = captured_stderr
+                exec(response, llm_globals, llm_locals)
+            finally:
+                # Always reset redirected output
+                sys.stdout = original_stdout
+                sys.stderr = original_stderr
+
+                # and append any captured stdout/stderr to the chat history
+                if stdout := captured_stdout.getvalue():
+                    chat.append(Message(Role.system, stdout))
+                    print(f'System:\n{stdout}' if '\n' in stdout else f'System: {stdout}')
+                if stderr := captured_stderr.getvalue():
+                    chat.append(Message(Role.system, stderr))
+                    print(f'System:\n{stderr}' if '\n' in stderr else f'System: {stderr}')
+
+        except Exception as e:
+            # add the exception/trace to the chat history
+            exception_str = ''.join(traceback.format_exception(type(e), e, e.__traceback__))
+            chat.append(Message(Role.system, exception_str))
+            print(f'System:\n{exception_str}' if '\n' in exception_str else f'System: {exception_str}')
+
+
+######### TODO: update prompt with notes about philosophy of metadata and what each part means #########
