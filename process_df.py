@@ -510,7 +510,54 @@ I need to identify the strftime format for this field. Without any other comment
 
             print(f'LLM identified {date.type.name}/{date.date_type.name} column "{col}" strftime format: "{fmt}"')
 
+    # Come up with descriptions for each annotated column
+    for feature in feature_annotations:
+        response = agent.oneshot_sync('You are a helpful assistant.', f'''\
+I'm looking at a dataset called "{meta.name}".  I have a column called "{feature.name}" with the following values (first 5 rows):
+{df[feature.name].head().to_string()}
+The current annotations for this column are:
+{feature.model_dump()}
+I need a description for this feature column. Please provide a brief description for this column.
+'''
+                                      )
+        feature_annotations[feature_idxs[feature.name]] = FeatureAnnotation(**{
+            **feature.model_dump(),
+            'description': response
+        })
+        print(f'LLM provided description for feature column "{feature.name}": "{response}"')
+
+    for date in date_annotations:
+        response = agent.oneshot_sync('You are a helpful assistant.', f'''\
+I'm looking at a dataset called "{meta.name}".  I have a column called "{date.name}" with the following values (first 5 rows):
+{df[date.name].head().to_string()}
+The current annotations for this column are:
+{date.model_dump()}
+I need a description for this date column. Please provide a brief description for this column.
+'''
+                                      )
+        date_annotations[date_idxs[date.name]] = DateAnnotation(**{
+            **date.model_dump(),
+            'description': response
+        })
+        print(f'LLM provided description for date column "{date.name}": "{response}"')
+
+    for geo in geo_annotations:
+        response = agent.oneshot_sync('You are a helpful assistant.', f'''\
+I'm looking at a dataset called "{meta.name}".  I have a column called "{geo.name}" with the following values (first 5 rows):
+{df[geo.name].head().to_string()}
+The current annotations for this column are:
+{geo.model_dump()}
+I need a description for this geo column. Please provide a brief description for this column.
+'''
+                                      )
+        geo_annotations[geo_idxs[geo.name]] = GeoAnnotation(**{
+            **geo.model_dump(),
+            'description': response
+        })
+        print(f'LLM provided description for geo column "{geo.name}": "{response}"')
+
     pdb.set_trace()
+
     return AnnotationSchema(
         geo=geo_annotations,
         date=date_annotations,
