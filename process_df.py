@@ -87,7 +87,6 @@ Select one of the following options: {', '.join(options)} or None: \
     return res
 
 
-
 def handle_df(df: pd.DataFrame, meta: Meta, agent: Agent) -> AnnotationSchema:
     # map from all ColumnType keys to empty lists
     column_type_map = {col_type.name: [] for col_type in ColumnType}
@@ -101,22 +100,22 @@ def handle_df(df: pd.DataFrame, meta: Meta, agent: Agent) -> AnnotationSchema:
         print(f'LLM identified column "{col}" as a {col_type}')
         column_type_map[col_type].append(col)
 
-
     # determine the type of date column for each
     date_type_map = {}
     for col in column_type_map['DATE']:
         date_type = identify_column_type(
             agent, df, col, meta,
-            enum_to_keys(DateType) + ['TIME'], # give the LLM an option for time-like columns, which we will treat as DATE
+            # give the LLM an option for time-like columns, which we will treat as DATE
+            enum_to_keys(DateType) + ['TIME'],
             '''\
 The column has been identified as containing date/time information.
 I need to identify the type of date/time information it contains.\
             '''
         )
-        if date_type == 'TIME': date_type = 'DATE' # metadata currently treats times as just DATE
+        if date_type == 'TIME':
+            date_type = 'DATE'  # metadata currently treats times as just DATE
         print(f'LLM identified DATE column "{col}" as a {date_type}')
         date_type_map[col] = date_type
-
 
     # identifying the type of geo column for each
     geo_type_map = {}
@@ -145,7 +144,6 @@ I need to identify the type of feature information it contains.\
         )
         print(f'LLM identified FEATURE column "{col}" as a {feature_type}')
         feature_type_map[col] = feature_type
-
 
     # create the annotations for each column
     geo_annotations: list[GeoAnnotation] = []
@@ -204,7 +202,6 @@ I need to identify the type of feature information it contains.\
                 qualifierrole=None,
             ))
 
-
     # identify geo lat/lon column pairs
     latlon_columns: list[str] = []
     isolated_geo_columns: list[str] = []
@@ -214,7 +211,6 @@ I need to identify the type of feature information it contains.\
             latlon_columns.append(geo.name)
         else:
             isolated_geo_columns.append(geo.name)
-
 
     latlon_pairs: list[tuple[str, str]] = []
     geo_type_match_map = {
@@ -227,7 +223,7 @@ I need to identify the type of feature information it contains.\
         candidates = [geo_annotations[geo_idxs[i]] for i in latlon_columns]
         candidates = [i for i in candidates if i.geo_type == geo_type_match_map[cur.geo_type]]
         if len(candidates) == 1:
-            #TBD: could have the llm check here if this is a valid match. probably not necessary though
+            # TBD: could have the llm check here if this is a valid match. probably not necessary though
             match, = candidates
             latlon_columns.remove(match.name)
 
@@ -240,9 +236,8 @@ I need to identify the type of feature information it contains.\
             continue
 
         pdb.set_trace()
-        #TODO: else ask the llm to pick the best matching pair if any
+        # TODO: else ask the llm to pick the best matching pair if any
         raise NotImplementedError('need to ask the llm to pick the best matching lat/lon pair if any')
-
 
     # mark the pairs in the geo annotations (revalidate each annotation with the new info)
     for c0_name, c1_name in latlon_pairs:
@@ -255,7 +250,7 @@ I need to identify the type of feature information it contains.\
                 'is_geo_pair': c1_name
             })
         )
-        #TODO: for now, only one column gets the is_geo_pair attribute
+        # TODO: for now, only one column gets the is_geo_pair attribute
         # c1 = geo_annotations[geo_idxs[c1_name]]
         # inplace_replace(
         #     geo_annotations,
@@ -266,11 +261,32 @@ I need to identify the type of feature information it contains.\
         #     })
         # )
 
-
-
     # handling latlon vs lonlat in single coordinate column
-    # TODO:...
-        
+    for col in geo_annotations:
+        if col.geo_type == GeoType.COORDINATES:
+            response = agent.oneshot_sync('You are a helpful assistant.', f'''\
+I'm looking at a dataset called "{meta.name}".  I have a column called "{col.name}" with the following values (first 5 rows):
+{df[col.name].head().to_string()}
+The column has been identified as containing geographic information, and has been marked as containing coordinates.
+I need to determine if these coordinates are Latitude,Longitude, or Longitude,Latitude. Without any other comments, please output one of the following options: "LATLON" or "LONLAT" or "UNSURE" if you are unsure.
+'''
+                                          )
+            if response == 'UNSURE':
+                print(f'LLM was unsure about the coordinate format for column "{col.name}"')
+                continue
+            if response not in ('LATLON', 'LONLAT'):
+                raise ValueError(f'LLM provided invalid coordinate format for column "{col.name}": {response}')
+            coord_format = CoordFormat.LATLON if response == 'LATLON' else CoordFormat.LONLAT
+            inplace_replace(
+                geo_annotations,
+                col,
+                GeoAnnotation(**{
+                    **col.model_dump(),
+                    'coord_format': coord_format
+                })
+            )
+            print(f'LLM identified coordinate column "{col.name}" as having format: "{coord_format.name}"')
+
     # identify the primary geo
     geo_candidates_str = latlon_pairs + isolated_geo_columns
 
@@ -299,11 +315,12 @@ I'm looking at a dataset called "{meta.name}".  I have the following geo columns
 {', '.join([ f'{i}:{col}' for i, col in enumerate(geo_candidates_str)])} (noting that columns part of a group are listed together)
 Without any other comments, please select the index of the most likely primary geo column(s) from the list above, i.e. please output a single integer (0-{len(geo_candidates_str)-1}) with your selection.
 '''
-        )
+                                         )
         try:
             primary_col = int(primary_col)
             if primary_col < 0 or primary_col >= len(geo_candidates_str):
-                raise ValueError(f'LLM provided out of range index for primary geo column. {primary_col=} out of {geo_candidates_str=}')
+                raise ValueError(
+                    f'LLM provided out of range index for primary geo column. {primary_col=} out of {geo_candidates_str=}')
             if primary_col < len(latlon_pairs):
                 group_names = latlon_pairs[primary_col]
                 for geo_name in group_names:
@@ -311,12 +328,11 @@ Without any other comments, please select the index of the most likely primary g
             else:
                 primary_col -= len(latlon_pairs)
                 mark_as_primary(isolated_geo_columns[primary_col])
-              
+
             print(f'LLM identified {geo_candidates_str[primary_col]} as the primary geo column(s)')
         except Exception as e:
             pdb.set_trace()
             print(e)
-
 
     # identify date column pairs/groups
     date_columns: list[str] = []
@@ -327,8 +343,7 @@ Without any other comments, please select the index of the most likely primary g
         else:
             isolated_date_columns.append(date.name)
 
-
-    date_groups: list[tuple[str,...]] = []
+    date_groups: list[tuple[str, ...]] = []
     while len(date_columns) > 0:
         cur_name = date_columns.pop()
         cur = date_annotations[date_idxs[cur_name]]
@@ -340,7 +355,7 @@ Without any other comments, please select the index of the most likely primary g
             for i in candidates:
                 date_columns.remove(i.name)
             continue
-        
+
         if len(candidates) == 0:
             isolated_date_columns.append(cur.name)
             continue
@@ -348,25 +363,24 @@ Without any other comments, please select the index of the most likely primary g
         pdb.set_trace()
         # TODO: else ask the llm to pick the best matching group if any
         raise NotImplementedError('need to ask the llm to pick the best matching DATE group if any')
-    
+
     # mark the groups in the date annotations (revalidate each annotation with the new info)
     for group in date_groups:
         # for date_name in group:
-            date_name = group[0] #TODO: for now just take the first column as the one marked with the associated columns
-            date = date_annotations[date_idxs[date_name]]
-            other_names = [i for i in group if i != date]
-            others = [date_annotations[date_idxs[i]] for i in other_names]
-            inplace_replace(
-                date_annotations,
-                date,
-                DateAnnotation(**{
-                    **date.model_dump(),
-                    # Dirty hack: convert DateType to TimeField. 
-                    # For now, we can only identify year, month, day groups. No hour or, minute columns
-                    'associated_columns': {TimeField[i.date_type.name]: i.name for i in others}
-                })
-            )
-    
+        date_name = group[0]  # TODO: for now just take the first column as the one marked with the associated columns
+        date = date_annotations[date_idxs[date_name]]
+        other_names = [i for i in group if i != date]
+        others = [date_annotations[date_idxs[i]] for i in other_names]
+        inplace_replace(
+            date_annotations,
+            date,
+            DateAnnotation(**{
+                **date.model_dump(),
+                # Dirty hack: convert DateType to TimeField.
+                # For now, we can only identify year, month, day groups. No hour or, minute columns
+                'associated_columns': {TimeField[i.date_type.name]: i.name for i in others}
+            })
+        )
 
     # identify primary date
     date_candidates_str = date_groups + isolated_date_columns
@@ -399,7 +413,8 @@ Without any other comments, please select the index of the most likely primary d
         try:
             primary_col = int(primary_col)
             if primary_col < 0 or primary_col >= len(date_candidates_str):
-                raise ValueError(f'LLM provided out of range index for primary date column. {primary_col=} out of {date_candidates_str=}')
+                raise ValueError(
+                    f'LLM provided out of range index for primary date column. {primary_col=} out of {date_candidates_str=}')
             if primary_col < len(date_groups):
                 group_names = date_groups[primary_col]
                 for date_name in group_names:
@@ -407,7 +422,7 @@ Without any other comments, please select the index of the most likely primary d
             else:
                 primary_col -= len(date_groups)
                 mark_as_primary(isolated_date_columns[primary_col])
-              
+
             print(f'LLM identified {date_candidates_str[primary_col]} as the primary date column(s)')
         except Exception as e:
             pdb.set_trace()
@@ -423,16 +438,17 @@ I'm looking at a dataset called "{meta.name}".  I have a column called "{col}" w
 The column has been identified as containing date/time information, and has been marked as a {date.date_type.name} column.
 I need to identify the strftime format for this field. Without any other comments, please output a valid strftime format string or UNSURE if you are unsure.
 '''
-            )
+                                          )
             if response == 'UNSURE':
                 print(f'LLM was unsure about the time format for {date.date_type.name} column "{col}"')
-                continue #TODO: could ask the user here. For now just skip
-            
-            #strip any wrapping quotes
+                continue  # TODO: could ask the user here. For now just skip
+
+            # strip any wrapping quotes
             fmt = response.strip('\'"`')
 
-            #TODO: check if format string is a valid format string
-            assert is_valid_strftime_format(fmt), f'LLM provided invalid strftime format string for {date.date_type.name} column "{col}": {fmt}'
+            # TODO: check if format string is a valid format string
+            assert is_valid_strftime_format(
+                fmt), f'LLM provided invalid strftime format string for {date.date_type.name} column "{col}": {fmt}'
 
             inplace_replace(
                 date_annotations,
