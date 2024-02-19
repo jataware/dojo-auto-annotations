@@ -261,6 +261,9 @@ Without any other comments, please select the index of the most likely pair for 
             pdb.set_trace()
             print(e)
 
+    for pair in latlon_pairs:
+        print(f'LLM identified coordinate pair: {pair}')
+
     # mark the pairs in the geo annotations (revalidate each annotation with the new info)
     for c0_name, c1_name in latlon_pairs:
         c0 = geo_annotations[geo_idxs[c0_name]]
@@ -382,9 +385,33 @@ Without any other comments, please select the index of the most likely primary g
             isolated_date_columns.append(cur.name)
             continue
 
-        pdb.set_trace()
-        # TODO: else ask the llm to pick the best matching group if any
-        raise NotImplementedError('need to ask the llm to pick the best matching DATE group if any')
+        # else ask the llm to pick the best matching group if any
+        candidate_names = [i.name for i in candidates]
+        candidate_heads = [df[i.name].head().to_string() for i in candidates]
+        response = agent.oneshot_sync('You are a helpful assistant.', f'''\
+I'm looking at a dataset called "{meta.name}".  I have a column called "{cur.name}" with the following values (first 5 rows):
+{df[cur.name].head().to_string()}
+I'm trying to identify the column that should be grouped with this date column. I have the following candidates:
+{', '.join([ f'{i}:{name} with values {head}' for i, (name, head) in enumerate(zip(candidate_names, candidate_heads))])}
+Without any other comments, please select the index or indices of the most likely the column(s) that pair with "{cur.name}" from the list above, i.e. please output a single integer (0-{len(candidates)-1}), or a comma separated list of integers.
+'''
+                                      )
+        try:
+            response = response.split(',')
+            response = [int(i) for i in response]
+            if any(i < 0 or i >= len(candidates) for i in response):
+                raise ValueError(
+                    f'LLM provided out of range index for date pair. {response=} out of {candidate_names=}')
+            date_groups.append((cur.name, *[candidates[i].name for i in response]))
+            for i in response:
+                date_columns.remove(candidates[i].name)
+            continue
+        except Exception as e:
+            pdb.set_trace()
+            print(e)
+
+    for group in date_groups:
+        print(f'LLM identified date group: {group}')
 
     # mark the groups in the date annotations (revalidate each annotation with the new info)
     for group in date_groups:
