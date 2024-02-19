@@ -202,6 +202,51 @@ I need to identify the type of feature information it contains.\
                 qualifierrole=None,
             ))
 
+    # identify the units of feature columns if any
+    for feature in feature_annotations:
+        response = agent.oneshot_sync('You are a helpful assistant.', f'''\
+I'm looking at a dataset called "{meta.name}".  I have a column called "{feature.name}" with the following values (first 5 rows):
+{df[feature.name].head().to_string()}
+I need to identify if this column has any obvious units (made clear either from the dataset description, column name or column values).
+Without any other comments, please provide the units for this feature column, NONE if units are not relevant, or UNSURE if you are unsure. E.g. if the unit was watts per meter squared, your answer should just be the string W/m^2\
+'''
+                                      )
+        if response == 'NONE':
+            inplace_replace(
+                feature_annotations,
+                feature,
+                FeatureAnnotation(**{
+                    **feature.model_dump(),
+                    'units': 'N/A',
+                    'units_description': 'N/A'
+                })
+            )
+            print(f'LLM identified no units for feature column "{feature.name}"')
+            continue
+        if response == 'UNSURE':
+            print(f'LLM was unsure about the units for feature column "{feature.name}"')
+            continue
+
+        units = response
+        # come up with a description for the units
+        response = agent.oneshot_sync('You are a helpful assistant.', f'''\
+I'm looking at a dataset called "{meta.name}".  I have a column called "{feature.name}" with the following values (first 5 rows):
+{df[feature.name].head().to_string()}
+The column has been identified as containing feature information, and has been marked as a {feature.feature_type.name} column with units "{units}".
+I need a description for these units. Please provide a brief one-line description of the units for this column.
+'''
+                                      )
+        inplace_replace(
+            feature_annotations,
+            feature,
+            FeatureAnnotation(**{
+                **feature.model_dump(),
+                'units': units,
+                'units_description': response
+            })
+        )
+        print(f'LLM provided units and description for feature column "{feature.name}": {units}. {response}')
+
     # identify geo lat/lon column pairs
     latlon_columns: list[str] = []
     isolated_geo_columns: list[str] = []
@@ -241,7 +286,8 @@ I need to identify the type of feature information it contains.\
         response = agent.oneshot_sync('You are a helpful assistant.', f'''\
 I'm looking at a dataset called "{meta.name}".  I have a column called "{cur.name}" with the following values (first 5 rows):
 {df[cur.name].head().to_string()}
-I'm trying to identify the column that should be paired with this coordinate column. I have the following candidates:
+I'm trying to identify the column that should be paired with this coordinate column. Typically pairs will be identifiable by commonalities in the column name.
+I have the following candidates:
 {', '.join([ f'{i}:{name} with values {head}' for i, (name, head) in enumerate(zip(candidate_names, candidate_heads))])}
 Without any other comments, please select the index of the most likely pair for the column "{cur.name}" from the list above, i.e. please output a single integer (0-{len(candidates)-1}) with your selection.
 '''
@@ -391,7 +437,9 @@ Without any other comments, please select the index of the most likely primary g
         response = agent.oneshot_sync('You are a helpful assistant.', f'''\
 I'm looking at a dataset called "{meta.name}".  I have a column called "{cur.name}" with the following values (first 5 rows):
 {df[cur.name].head().to_string()}
-I'm trying to identify the column that should be grouped with this date column. I have the following candidates:
+I'm trying to identify the column that should be grouped with this date column. 
+A group may contain 0 or 1 YEAR columns, 0 or 1 MONTH columns, 0 or 1 DAY columns. Groups will typically be identifiable by commonalities in their name
+I have the following candidates:
 {', '.join([ f'{i}:{name} with values {head}' for i, (name, head) in enumerate(zip(candidate_names, candidate_heads))])}
 Without any other comments, please select the index or indices of the most likely the column(s) that pair with "{cur.name}" from the list above, i.e. please output a single integer (0-{len(candidates)-1}), or a comma separated list of integers.
 '''
@@ -517,7 +565,7 @@ I'm looking at a dataset called "{meta.name}".  I have a column called "{feature
 {df[feature.name].head().to_string()}
 The current annotations for this column are:
 {feature.model_dump()}
-I need a description for this feature column. Please provide a brief description for this column.
+I need a description for this feature column. Please provide a brief description for this column. Do not refer to the column itself in your description, and do not include any other comments, only write the description.
 '''
                                       )
         feature_annotations[feature_idxs[feature.name]] = FeatureAnnotation(**{
@@ -532,7 +580,7 @@ I'm looking at a dataset called "{meta.name}".  I have a column called "{date.na
 {df[date.name].head().to_string()}
 The current annotations for this column are:
 {date.model_dump()}
-I need a description for this date column. Please provide a brief description for this column.
+I need a description for this date column. Please provide a brief description for this column. Do not refer to the column itself in your description, and do not include any other comments, only write the description.
 '''
                                       )
         date_annotations[date_idxs[date.name]] = DateAnnotation(**{
@@ -545,9 +593,7 @@ I need a description for this date column. Please provide a brief description fo
         response = agent.oneshot_sync('You are a helpful assistant.', f'''\
 I'm looking at a dataset called "{meta.name}".  I have a column called "{geo.name}" with the following values (first 5 rows):
 {df[geo.name].head().to_string()}
-The current annotations for this column are:
-{geo.model_dump()}
-I need a description for this geo column. Please provide a brief description for this column.
+I need a description for this geo column. Please provide a brief description for this column. Do not refer to the column itself in your description, and do not include any other comments, only write the description.
 '''
                                       )
         geo_annotations[geo_idxs[geo.name]] = GeoAnnotation(**{
