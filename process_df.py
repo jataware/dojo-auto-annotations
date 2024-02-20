@@ -379,6 +379,7 @@ I need to determine if these coordinates are Latitude,Longitude, or Longitude,La
             group, = latlon_pairs
             for geo_name in group:
                 mark_as_primary(geo_name)
+        print(f'LLM identified {repr(geo_candidates_str[0])} as the primary geo')
 
     elif len(geo_candidates_str) > 1:
         primary_col = agent.oneshot_sync('You are a helpful assistant.', f'''\
@@ -500,6 +501,7 @@ Without any other comments, please select the index or indices of the most likel
             group, = date_groups
             for date_name in group:
                 mark_as_primary(date_name)
+        print(f'LLM identified {repr(date_candidates_str[0])} as the primary date')
 
     elif len(date_candidates_str) > 1:
         primary_col = agent.oneshot_sync('You are a helpful assistant.', f'''\
