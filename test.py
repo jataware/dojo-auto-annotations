@@ -63,5 +63,36 @@ I would like to ensure that it is just a simple description purely about the dat
     return desc
 
 
+def main2():
+    from argparse import ArgumentParser
+    from pathlib import Path
+
+    parser = ArgumentParser()
+    parser.add_argument('--path', action='store', type=Path)
+    parser.add_argument('--name', action='store', type=str)
+    parser.add_argument('--description', action='store', type=str)
+    args = parser.parse_args()
+
+    meta = Meta(args.path, args.name, args.description)
+
+    set_openai_key()
+
+    agent = Agent(model='gpt-4-turbo-preview', timeout=10.0)
+
+    if args.path.suffix == '.csv':
+        annotations = handle_csv(meta, agent)
+    elif args.path.suffix == '.xlsx':
+        annotations = handle_xlsx(meta, agent)
+    elif args.path.suffix == '.nc':
+        annotations = handle_netcdf(meta, agent)
+    elif args.path.suffix == '.tif' or args.path.suffix == '.tiff':
+        annotations = handle_geotiff(meta, agent)
+    else:
+        raise ValueError(f'Unhandled file type: {args.path.suffix}')
+
+    print(annotations)
+
+
 if __name__ == '__main__':
-    main()
+    # main()
+    main2()

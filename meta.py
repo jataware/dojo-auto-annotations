@@ -10,13 +10,15 @@ class Meta:
     name: str
     description: str
 
-    def __init__(self, path: str, name: str, description: str):
+    @staticmethod
+    def from_meta_text_row(path: str, name: str, description: str):
         assert path.startswith('[') and path.endswith(']')
-        self.path = Path('datasets', path[1:-1])
+        path = Path('datasets', path[1:-1])
         assert name.startswith('Name:')
-        self.name = name[5:].strip()
+        name = name[5:].strip()
         assert description.startswith('Description:')
-        self.description = description[12:].strip()
+        description = description[12:].strip()
+        return Meta(path, name, description)
 
 
 def get_meta() -> list[Meta]:
@@ -24,6 +26,6 @@ def get_meta() -> list[Meta]:
     meta = meta.split('\n\n')
     meta = [m.strip() for m in meta]
     meta = [m for m in meta if m]
-    meta = [Meta(*m.split('\n')) for m in meta]
+    meta = [Meta.from_meta_text_row(*m.split('\n')) for m in meta]
 
     return meta
