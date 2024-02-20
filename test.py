@@ -27,12 +27,13 @@ def main():
     set_openai_key()
 
     meta = get_meta()
-    meta = [meta[3]]  # debug, look just at one file
+    meta = [*meta[:12]]  # debug, look just at the csv/xlsx files
 
     # shorten the description if necessary
     agent = Agent(model='gpt-4-turbo-preview', timeout=10.0)
 
     for m in meta:
+        print(m)
         if len(m.description) > 1000:
             m.description = shorten_description(m, agent)
 
@@ -48,13 +49,16 @@ def main():
             raise ValueError(f'Unhandled file type: {m.path.suffix}')
 
         print(annotations)
+        print('\n\n')
 
 
 def shorten_description(meta: Meta, agent: Agent) -> str:
     desc = agent.oneshot_sync('You are a helpful assistant.', f'''\
 I have a dataset called "{meta.name}" With the following description:
-"{meta.description}"
-If there is a lot of superfluous information, could you pare it down to just the key details? Output only the new description without any other comments. If there are not superfluous details, output only the original unmodified description.\
+"""
+{meta.description}
+"""
+I would like to ensure that it is just a simple description purely about the data without any other superfluous information. Things to remove include contact info, bibliographies, URLs, etc. If there is a lot of superfluous information, could you pare it down to just the key details? Output only the new description without any other comments. If there are not superfluous details, output only the original unmodified description.\
 ''')
     return desc
 

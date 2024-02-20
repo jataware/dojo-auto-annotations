@@ -42,14 +42,16 @@ class Agent:
         ])
 
     def multishot_sync(self, messages: list[Message]) -> str:
-        client = OpenAI()
-        completion = client.chat.completions.create(
-            model=self.model,
-            messages=messages,
-            timeout=self.timeout
-        )
-        result = completion.choices[0].message.content
-        return result
+        # client = OpenAI()
+        # completion = client.chat.completions.create(
+        #     model=self.model,
+        #     messages=messages,
+        #     timeout=self.timeout
+        # )
+        # result = completion.choices[0].message.content
+        # return result
+        gen = self.multishot_streaming(messages)
+        return ''.join([*gen])
 
     def multishot_streaming(self, messages: list[Message]) -> Generator[str, None, None]:
         client = OpenAI()
@@ -61,7 +63,9 @@ class Agent:
         )
         for chunk in gen:
             try:
-                yield chunk.choices[0].delta.content
+                content = chunk.choices[0].delta.content
+                if content:
+                    yield content
             except:
                 pass
 

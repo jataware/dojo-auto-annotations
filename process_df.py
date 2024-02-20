@@ -604,7 +604,7 @@ I need a description for this geo column. Please provide a brief description for
         })
         print(f'LLM provided description for geo column "{geo.name}": "{response}"')
 
-    pdb.set_trace()
+    # pdb.set_trace()
 
     return AnnotationSchema(
         geo=geo_annotations,
