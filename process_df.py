@@ -87,7 +87,7 @@ Select one of the following options: {', '.join(options)} or None: \
     return res
 
 
-def OLD_handle_df(df: pd.DataFrame, meta: Meta, agent: Agent) -> AnnotationSchema:
+def handle_df(df: pd.DataFrame, meta: Meta, agent: Agent) -> AnnotationSchema:
     # map from all ColumnType keys to empty lists
     column_type_map = {col_type.name: [] for col_type in ColumnType}
 
@@ -611,7 +611,7 @@ I need a description for this geo column. Please provide a brief description for
     )
 
 
-def handle_df(df: pd.DataFrame, meta: Meta, agent: Agent) -> AnnotationSchema:
+def BROKEN_handle_df(df: pd.DataFrame, meta: Meta, agent: Agent) -> AnnotationSchema:
     """Open ended attempt to get llm to handle the dataframe annotations"""
 
     import sys
